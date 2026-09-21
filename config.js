@@ -1,8 +1,7 @@
 window.RET_CONFIG = Object.freeze({
-  // Put your public Wispbyte URL here after the bot has a public port.
-  // Example: https://ret-panel.your-wispbyte-host.example
-  API_BASE: "https://YOUR-WISPBYTE-PUBLIC-URL",
-  WEB_ORIGIN: "https://kndkhe9g38d-ctrl.github.io",
+  // The panel is served by RET itself, so no API URL or token is needed here.
+  API_BASE: "",
+  WEB_ORIGIN: "",
   SUPPORT_URL: "https://discord.gg/SHgz77ZUkm",
   DEFAULT_LOCALE: "ar"
 });
