@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11131a">
+  <meta name="description" content="RET Control Panel — Discord bot dashboard.">
+  <meta property="og:title" content="RET Control Panel">
+  <meta property="og:description" content="Manage RET, your Discord servers, security, tickets, automation and premium systems.">
+  <meta property="og:image" content="assets/ret-logo.png">
+  <title>RET Control Panel</title>
+  <link rel="icon" href="assets/ret-logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="boot" id="boot"><div class="boot-ring"></div><b>RET</b><span>Initializing control panel…</span></div>
+
+  <div id="loginView" class="login-view hidden">
+    <div class="login-glow glow-a"></div><div class="login-glow glow-b"></div>
+    <div class="login-card">
+      <div class="brand-lockup"><img src="assets/ret-logo.png" alt="RET"><div><b>RET</b><span>Control Panel</span></div></div>
+      <div class="eyebrow">EMPEROR ENGINE</div>
+      <h1 id="loginTitle">Control everything from one place.</h1>
+      <p id="loginText">Sign in with Discord to manage the servers where you have permission.</p>
+      <button class="discord-login" id="loginBtn"><span class="discord-mark">◉</span><span id="loginBtnText">Continue with Discord</span></button>
+      <div class="login-note"><span class="dot"></span><span id="loginNote">Your bot token stays on the server. It is never exposed to this website.</span></div>
+      <div class="login-links"><a href="./" id="publicSiteLink">RET</a><span>•</span><a target="_blank" rel="noopener" href="https://discord.gg/SHgz77ZUkm">Support</a></div>
+    </div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <div class="brand"><img src="assets/ret-logo.png" alt="RET"><div><b>RET</b><span>Control Panel</span></div></div>
+        <button class="mobile-close" id="mobileClose" aria-label="Close">×</button>
+      </div>
+
+      <div class="server-picker" id="serverPicker">
+        <div class="server-avatar" id="serverAvatar">R</div>
+        <div class="server-meta"><small id="serverPickerLabel">Server</small><b id="serverName">Select a server</b></div>
+        <span class="chevron">⌄</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a class="nav-item active" data-page="dashboard"><span>⌂</span><label data-i18n="dashboard">Dashboard</label></a>
+        <a class="nav-item" data-page="servers"><span>▦</span><label data-i18n="servers">Servers</label></a>
+        <a class="nav-item" data-page="commands"><span>⌘</span><label data-i18n="commands">Commands</label></a>
+        <a class="nav-item" data-page="moderation"><span>◈</span><label data-i18n="moderation">Moderation</label></a>
+        <a class="nav-item" data-page="security"><span>◉</span><label data-i18n="security">Security</label></a>
+        <a class="nav-item" data-page="tickets"><span>▤</span><label data-i18n="tickets">Tickets</label></a>
+        <a class="nav-item" data-page="automation"><span>⚡</span><label data-i18n="automation">Automation</label></a>
+        <a class="nav-item" data-page="economy"><span>◌</span><label data-i18n="economy">Economy</label></a>
+        <a class="nav-item" data-page="premium"><span>✦</span><label data-i18n="premium">Premium</label></a>
+        <a class="nav-item" data-page="branding"><span>◇</span><label data-i18n="branding">Branding</label></a>
+        <a class="nav-item" data-page="logs"><span>≋</span><label data-i18n="logs">Logs</label></a>
+        <a class="nav-item" data-page="settings"><span>⚙</span><label data-i18n="settings">Settings</label></a>
+        <a class="nav-item developer-link hidden" data-page="developer"><span>⬢</span><label data-i18n="developer">Developer</label></a>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="user-card"><img id="userAvatar" src="assets/ret-logo.png" alt=""><div><b id="userName">—</b><span id="userTag">—</span></div><button id="logoutBtn" title="Logout">↪</button></div>
+      </div>
+    </aside>
+
+    <div class="mobile-shade" id="mobileShade"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu">☰</button>
+        <div class="crumb"><span id="pageEyebrow">RET</span><strong id="pageTitle">Dashboard</strong></div>
+        <div class="top-actions">
+          <button class="status-chip" id="statusChip"><i></i><span id="statusLabel">Checking</span></button>
+          <button class="lang-button" id="langButton">AR</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="page active" id="page-dashboard"></section>
+        <section class="page" id="page-servers"></section>
+        <section class="page" id="page-commands"></section>
+        <section class="page" id="page-moderation"></section>
+        <section class="page" id="page-security"></section>
+        <section class="page" id="page-tickets"></section>
+        <section class="page" id="page-automation"></section>
+        <section class="page" id="page-economy"></section>
+        <section class="page" id="page-premium"></section>
+        <section class="page" id="page-branding"></section>
+        <section class="page" id="page-logs"></section>
+        <section class="page" id="page-settings"></section>
+        <section class="page" id="page-developer"></section>
+      </div>
+    </main>
+
+    <div class="modal hidden" id="serverModal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="modal-head"><div><span class="eyebrow" data-i18n="serverSelect">SERVER SELECT</span><h3 id="modalTitle">Your servers</h3></div><button class="icon-btn" id="closeServerModal">×</button></div>
+        <div class="search-box"><span>⌕</span><input id="serverSearch" data-placeholder="searchServers" placeholder="Search servers…"></div>
+        <div id="serverList" class="server-list"></div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="langModal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card small">
+        <div class="modal-head"><div><span class="eyebrow">LANGUAGE</span><h3 data-i18n="chooseLanguage">Choose language</h3></div><button class="icon-btn" id="closeLangModal">×</button></div>
+        <div class="language-grid" id="languageGrid"></div>
+      </div>
+    </div>
+
+    <div class="toast-stack" id="toastStack"></div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
