@@ -1,7 +1,8 @@
 window.RET_CONFIG = Object.freeze({
-  // The panel is served by RET itself, so no API URL or token is needed here.
-  API_BASE: "",
-  WEB_ORIGIN: "",
-  SUPPORT_URL: "https://discord.gg/SHgz77ZUkm",
+  // Public WispByte backend used by the RET panel.
+  // Never put the Discord bot token or OAuth client secret here.
+  API_BASE: "http://78.154.103.42:9975",
+  WEB_ORIGIN: "https://kndkhe9g38d-ctrl.github.io",
+  SUPPORT_URL: "https://discord.gg/SHgz77ZUkM",
   DEFAULT_LOCALE: "ar"
 });
