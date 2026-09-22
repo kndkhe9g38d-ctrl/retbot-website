@@ -6,7 +6,7 @@ WISPBYTE
 - Keep secrets only in WispByte Environment Variables.
 
 Required environment variables:
-DISCORD_TOKEN=<your Discord bot token>
+DISCORD_TOKEN=<MTU0NzcyOTkyMTMxOTc3MjE5Mg.GryNY2.XIVj4iq-QaL-l9iC3Pa5uz-wIqmNRnyVe6BzhI>
 RET_PANEL_CLIENT_ID=1547729921319772192
 RET_PANEL_CLIENT_SECRET=<your Discord OAuth client secret>
 RET_OAUTH_REDIRECT_URI=https://retbot.wispbyte.app/auth/callback
