@@ -1,9 +1,7 @@
 (() => {
-  const normalize = (value) => String(value || "").trim().replace(/\/+$/, "");
-
   window.RET_CONFIG = Object.freeze({
-    API_BASE: normalize("https://retbot.wispbyte.app"),
-    WEB_ORIGIN: window.location.origin,
+    API_BASE: "https://retbot.wispbyte.app",
+    WEB_ORIGIN: "https://kndkhe9g38d-ctrl.github.io",
     SUPPORT_URL: "https://discord.gg/SHgz77ZUkM",
     DEFAULT_LOCALE: "ar"
   });
