@@ -1,0 +1,33 @@
+RET — DEPLOYMENT
+
+WISPBYTE
+- Startup command: node index.js
+- Node.js: 20+
+- Keep secrets only in WispByte Environment Variables.
+
+Required environment variables:
+DISCORD_TOKEN=<your Discord bot token>
+RET_PANEL_CLIENT_ID=1547729921319772192
+RET_PANEL_CLIENT_SECRET=<your Discord OAuth client secret>
+RET_OAUTH_REDIRECT_URI=https://retbot.wispbyte.app/auth/callback
+RET_WEB_ORIGIN=https://kndkhe9g38d-ctrl.github.io
+RET_WEB_ORIGINS=https://kndkhe9g38d-ctrl.github.io,https://retbot.wispbyte.app
+RET_PANEL_ORIGIN=https://kndkhe9g38d-ctrl.github.io/retbot-website/
+BOT_HEALTH_PORT=9975
+BOT_HEALTH_HOST=0.0.0.0
+RET_DATA_DIR=/home/container/ret-persistent
+RET_STATE_BACKUPS=5
+BOT_HEALTH_ADMIN_TOKEN=<random private admin token>
+
+Discord OAuth redirect must be exactly:
+https://retbot.wispbyte.app/auth/callback
+
+GITHUB PAGES
+- Upload the contents of the GitHub package to the repository root.
+- GitHub Pages source: Deploy from branch, root (/).
+- The public website is:
+  https://kndkhe9g38d-ctrl.github.io/retbot-website/
+
+Security:
+- Never put DISCORD_TOKEN or RET_PANEL_CLIENT_SECRET in GitHub.
+- Never commit .env.
