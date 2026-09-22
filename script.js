@@ -3,7 +3,7 @@ const API_BASE=String(CONFIG.API_BASE||"").trim().replace(/\/$/,"");
 const state={me:null,guilds:[],guild:null,config:null,overview:null,commands:[],channels:[],roles:[],logs:[],webhooks:[],status:null,page:"overview"};
 const $=(s,r=document)=>r.querySelector(s); const $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
-const api=async(path,opt={})=>{const res=await fetch(API_BASE+path,{credentials:"include",headers:{"content-type":"application/json",...(opt.headers||{})},...opt});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||`HTTP ${res.status}`);return data};
+const api=async(path,opt={})=>{if(!ensureApiBase())throw new Error("API_BASE غير مضبوط");const res=await fetch(API_BASE+path,{credentials:"include",headers:{"content-type":"application/json",...(opt.headers||{})},...opt});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||`HTTP ${res.status}`);return data};
 const toast=(m,type="ok")=>{const x=document.createElement("div");x.className=`toast ${type==="error"?"err":"ok"}`;x.textContent=m;$("#toastStack").appendChild(x);setTimeout(()=>x.remove(),3200)};
 const fmt=v=>v?new Date(v).toLocaleString("ar-IQ",{dateStyle:"medium",timeStyle:"short"}):"—";
 const on=key=>!!(state.config?.panel?.[key]?.enabled);
