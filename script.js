@@ -1,5 +1,6 @@
 const CONFIG=window.RET_CONFIG||{};
 const API_BASE=String(CONFIG.API_BASE||"").trim().replace(/\/$/,"");
+const ensureApiBase=()=>Boolean(API_BASE);
 const state={me:null,guilds:[],guild:null,config:null,overview:null,commands:[],channels:[],roles:[],logs:[],webhooks:[],status:null,page:"overview"};
 const $=(s,r=document)=>r.querySelector(s); const $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -49,7 +50,7 @@ function openServers(){renderServerList();$('#serverModal').classList.remove('hi
 function closeServers(){$('#serverModal').classList.add('hidden')}
 function renderServerList(filter=''){const list=state.guilds.filter(g=>g.name.toLowerCase().includes(filter.toLowerCase()));$('#serverList').innerHTML=list.map(g=>`<div class="server-option" data-id="${g.id}">${g.icon?`<img src="${esc(g.icon)}">`:`<div class="server-avatar">${esc(g.name[0])}</div>`}<div><b>${esc(g.name)}</b><span>${g.botInstalled?'RET installed':'RET not installed'} · ${g.approximateMemberCount??'?'} members</span></div><span class="badge ${g.botInstalled?'green':''}">${g.botInstalled?'Manage':'Install'}</span></div>`).join('')||'<div class="empty">لا توجد نتائج.</div>';$$('.server-option').forEach(x=>x.onclick=async()=>{closeServers();try{await loadGuild(x.dataset.id)}catch(e){toast(e.message,'error')}})}
 async function refreshStatus(){try{state.status=await api('/api/status');const ok=state.status.status==='healthy';$('#statusChip').className='status-chip '+(ok?'ok':'bad');$('#statusLabel').textContent=ok?'Online':'Degraded'}catch{$('#statusChip').className='status-chip bad';$('#statusLabel').textContent='Offline'}}
-function showLogin(){ $('#boot').classList.add('hidden');$('#loginView').classList.remove('hidden');$('#appView').classList.add('hidden');$('#loginBtn').onclick=()=>{location.href=API_BASE+'/auth/discord'} }
+function showLogin(){ $('#boot').classList.add('hidden');$('#loginView').classList.remove('hidden');$('#appView').classList.add('hidden');$('#loginBtn').onclick=()=>{if(!API_BASE){toast('رابط API غير مضبوط','error');return;}location.href=API_BASE+'/auth/discord'} }
 async function boot(){try{const me=await api('/api/me');state.me=me.user;state.guilds=me.guilds||[];$('#boot').classList.add('hidden');$('#loginView').classList.add('hidden');$('#appView').classList.remove('hidden');$('#userName').textContent=state.me.global_name||state.me.username;$('#userTag').textContent=state.me.username;$('#userAvatar').src=state.me.avatar?`https://cdn.discordapp.com/avatars/${state.me.id}/${state.me.avatar}.png?size=128`:'assets/ret-logo.png';if(me.isDeveloper)$('.developer-link').classList.remove('hidden');await refreshStatus();if(state.guilds[0])await loadGuild(state.guilds[0].id);else renderPage()}catch{showLogin()}}
 function closeMobile(){$('#sidebar').classList.remove('open');$('#mobileShade').classList.remove('show')}
 $('#sidebarNav').onclick=e=>{const n=e.target.closest('.nav-item');if(n)setPage(n.dataset.page)};
