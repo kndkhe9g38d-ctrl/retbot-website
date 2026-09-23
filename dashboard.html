@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="ret-api-origin" content="https://retbot.wispbyte.app">
+  <title>RET Dashboard</title>
+  <link id="ret-favicon" rel="icon" href="https://cdn.discordapp.com/embed/avatars/0.png"><link rel="stylesheet" href="style.css">
+</head>
+<body data-page="dashboard">
+  <div class="app-shell">
+    <aside class="sidebar glass" id="sidebar">
+      <a class="brand sidebar-brand" href="index.html"><img data-bot-avatar alt="RET"><span>RET <b>Control</b></span></a>
+      <div class="sidebar-user"><img id="userAvatar" alt="User"><div><b id="userName">Loading…</b><span id="userRole">—</span></div></div>
+      <div class="server-select"><label>السيرفر</label><select id="guildSelect"></select></div>
+      <nav id="sectionNav" class="section-nav"></nav>
+      <div class="sidebar-foot"><a href="developer.html">Developer</a><button id="logoutBtn" class="link-btn">تسجيل الخروج</button></div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar glass"><div class="mobile-menu" id="mobileMenu">☰</div><div class="page-title"><span class="kicker">RET CONTROL CORE</span><h1 id="pageTitle">Overview</h1></div><div class="top-actions"><span id="botOnline" class="status-badge">Checking…</span><img data-bot-avatar class="top-avatar" alt="Bot"></div></header>
+
+      <section id="dashboardContent" class="dashboard-content"></section>
+      <div id="toast" class="toast"></div>
+    </main>
+  </div>
+  <script src="app.js" defer></script>
+</body>
+</html>
