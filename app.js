@@ -3,7 +3,29 @@
 (() => {
   const meta = document.querySelector('meta[name="ret-api-origin"]');
   const API_BASE = (meta?.content || 'https://retbot.wispbyte.app').replace(/\/$/, '');
+  const LOCAL_LOGO = 'assets/ret-logo.png';
   const page = document.body.dataset.page || 'home';
+
+  // GitHub Pages serves static assets with strict MIME types. Keep every image
+  // usable even when a remote Discord/avatar URL is unavailable.
+  function bindImageFallbacks() {
+    $$('[data-image-fallback], [data-bot-avatar]').forEach(img => {
+      if (img.dataset.fallbackBound) return;
+      img.dataset.fallbackBound = '1';
+      img.addEventListener('error', () => {
+        if (img.dataset.fallbackApplied) return;
+        img.dataset.fallbackApplied = '1';
+        img.src = LOCAL_LOGO;
+      }, { once: true });
+      if (!img.getAttribute('src')) img.src = LOCAL_LOGO;
+    });
+  }
+  function botAvatarUrl(user) {
+    if (user?.avatarURL) return user.avatarURL;
+    if (user?.id && user?.avatar) return `https://cdn.discordapp.com/avatars/${encodeURIComponent(user.id)}/${encodeURIComponent(user.avatar)}.png?size=128`;
+    return LOCAL_LOGO;
+  }
+  function goToLogin() { window.location.replace(`${API_BASE}/auth/discord`); }
 
   const coreSections = [
     ['overview','◈','Overview / General','نظرة عامة وإعدادات السيرفر'],
@@ -87,19 +109,19 @@
   const patch = (path, body) => api(path, { method: 'PATCH', body: JSON.stringify(body) });
 
   async function loadBotIdentity() {
+    bindImageFallbacks();
+    $$('[data-bot-avatar]').forEach(el => { el.src = el.getAttribute('src') || LOCAL_LOGO; });
+    const favicon = $('#ret-favicon'); if (favicon) favicon.href = LOCAL_LOGO;
     try {
-      const data = await api('/api/public/config');
-      const avatar = `${data.avatarURL}${data.avatarURL.includes('?') ? '&' : '?'}v=${encodeURIComponent(data.avatarVersion || Date.now())}`;
-      $$('[data-bot-avatar]').forEach(el => { el.src = avatar; });
-      const favicon = $('#ret-favicon'); if (favicon) favicon.href = `${API_BASE}/bot-avatar.png?v=${encodeURIComponent(data.avatarVersion || Date.now())}`;
-      const online = data.online ? 'ONLINE' : 'OFFLINE';
-      const status = $('#identityStatus'); if (status) status.textContent = online;
-      const sGuilds = $('#statGuilds'); if (sGuilds) sGuilds.textContent = Number(data.guildCount || 0).toLocaleString();
-      const sUptime = $('#statUptime'); if (sUptime) sUptime.textContent = formatDuration(data.uptime || 0);
-      if ($('#botOnline')) $('#botOnline').textContent = online;
+      const data = await api('/api/status');
+      const online = data.status === 'healthy' || data.status === 'degraded' || data.online === true;
+      if ($('#identityStatus')) $('#identityStatus').textContent = online ? 'ONLINE' : 'OFFLINE';
+      if ($('#botOnline')) $('#botOnline').textContent = online ? 'ONLINE' : 'OFFLINE';
+      if ($('#statGuilds')) $('#statGuilds').textContent = Number(data.guildCount ?? data.guilds ?? 0).toLocaleString();
+      if ($('#statUptime')) $('#statUptime').textContent = formatDuration(data.uptimeMs ? data.uptimeMs / 1000 : (data.uptime || 0));
     } catch (error) {
-      if ($('#identityStatus')) $('#identityStatus').textContent = 'API unreachable';
-      if ($('#botOnline')) $('#botOnline').textContent = 'API unreachable';
+      if ($('#identityStatus')) $('#identityStatus').textContent = 'ONLINE CHECK UNAVAILABLE';
+      if ($('#botOnline')) $('#botOnline').textContent = 'API CHECK FAILED';
     }
   }
   function formatDuration(seconds) {
@@ -119,9 +141,9 @@
 
   async function loadMe() {
     const me = await api('/api/me');
-    if ($('#userAvatar') && me.user?.avatarURL) $('#userAvatar').src = me.user.avatarURL;
+    if ($('#userAvatar')) { $('#userAvatar').src = botAvatarUrl(me.user); $('#userAvatar').dataset.fallbackApplied = ''; bindImageFallbacks(); }
     if ($('#userName')) $('#userName').textContent = me.user?.globalName || me.user?.username || 'User';
-    if ($('#userRole')) $('#userRole').textContent = me.developer ? 'Developer' : (me.user?.role || 'User');
+    if ($('#userRole')) $('#userRole').textContent = me.isDeveloper ? 'Developer' : 'Server Manager';
     return me;
   }
 
@@ -129,7 +151,7 @@
     const result = await api('/api/guilds');
     const select = $('#guildSelect');
     if (!select) return;
-    select.innerHTML = result.guilds.map(g => `<option value="${escapeHTML(g.id)}">${escapeHTML(g.name)} ${g.installed ? '• RET' : '• غير مثبت'}</option>`).join('');
+    select.innerHTML = result.guilds.map(g => `<option value="${escapeHTML(g.id)}">${escapeHTML(g.name)} ${g.botInstalled ? '• RET' : '• غير مثبت'}</option>`).join('');
     if (!result.guilds.length) throw new Error('لا توجد سيرفرات تملك Administrator فيها.');
     currentGuildId = select.value;
     await selectGuild();
@@ -139,7 +161,11 @@
     const select = $('#guildSelect'); if (select) currentGuildId = select.value;
     if (!currentGuildId) return;
     try {
-      currentGuildData = await api(`/api/guild/${encodeURIComponent(currentGuildId)}`);
+      currentGuildData = await api(`/api/guilds/${encodeURIComponent(currentGuildId)}`);
+      currentGuildData.settings = currentGuildData.config || {};
+      currentGuildData.guild = currentGuildData.guild || {};
+      currentGuildData.guild.channels = currentGuildData.channels || [];
+      currentGuildData.guild.roles = currentGuildData.roles || [];
       renderDashboard();
     } catch (error) { toast(error.message, 'error'); }
   }
@@ -150,10 +176,49 @@
     $$('#sectionNav button').forEach(btn => btn.addEventListener('click', () => { activeSection = btn.dataset.section; renderNav(); renderDashboard(); }));
   }
 
-  function saveSection(section, config, enabled = true) {
-    return patch(`/api/guild/${currentGuildId}/settings`, { sections: { [section]: { enabled, config } } });
+  async function saveSection(section, config, enabled = true) {
+    const patchData = {};
+    if (section === 'moderation') {
+      patchData.automodEnabled = Boolean(enabled);
+      patchData.antiraidEnabled = Boolean(config?.antiRaid?.enabled);
+      patchData.antispamEnabled = Boolean(enabled);
+    } else if (section === 'tickets') {
+      patchData.ticketCategoryId = config?.categoryId || undefined;
+      patchData.ticketSupportRoleId = config?.supportRoleId || undefined;
+      patchData.ticketLogChannelId = config?.channelId || undefined;
+    } else if (section === 'visuals') {
+      patchData.bannerUrl = config?.bannerURL || undefined;
+    } else if (section === 'verification') {
+      patchData.verificationRoleId = config?.roleId || undefined;
+    } else {
+      throw new Error('هذه الوحدة تحتاج API مخصص في الباك إند؛ تم إبقاء الواجهة مستقرة بدون إرسال طلب غير مدعوم.');
+    }
+    const r = await patch(`/api/guilds/${encodeURIComponent(currentGuildId)}/config`, patchData);
+    currentGuildData.config = r.config || currentGuildData.config;
+    currentGuildData.settings = currentGuildData.config;
+    return r;
   }
-  function sectionDoc(section) { return currentGuildData?.settings?.[section] || { enabled: false, config: {} }; }
+  function sectionDoc(section) {
+    const c = currentGuildData?.config || currentGuildData?.settings || {};
+    const map = {
+      moderation: { enabled: Boolean(c.automodEnabled || c.antiraidEnabled || c.antispamEnabled), config: { blockLinks: Boolean(c.automod?.linkFilter?.enabled), blockedWords: c.automod?.bannedWords || [], antiRaid: { enabled: Boolean(c.antiraidEnabled || c.raidProtection?.enabled), threshold: c.raidProtection?.joinThreshold || 8 } } },
+      tickets: { enabled: Boolean(c.ticketCategoryId || c.ticketSupportRoleId), config: { categoryId:c.ticketCategoryId, supportRoleId:c.ticketSupportRoleId, channelId:c.ticketLogChannelId, buttonLabel:'فتح تذكرة' } },
+      welcome: { enabled: Boolean(c.welcomeChannelId), config: { channelId:c.welcomeChannelId, message:'مرحباً {user} في {server}!', leaveChannelId:c.leaveChannelId, leaveMessage:'غادر {user} السيرفر.' } },
+      roles: { enabled: Boolean(c.autoRoleId || (c.selfAssignableRoleIds||[]).length || (c.reactionRoles||[]).length), config: { autoRoleIds:c.autoRoleId?[c.autoRoleId]:[], roleMap:c.reactionRoles||{} } },
+      economy: { enabled: true, config: { currency:'RET', startingBalance:0, dailyReward:0, workMin:0, workMax:0 } },
+      leveling: { enabled: Boolean(c.levelSettings?.enabled), config: { xpPerMessage:c.levelSettings?.minXpPerMessage||15, xpPerLevel:c.levelSettings?.baseXp||100, announceChannelId:'', voiceXP:false } },
+      logging: { enabled: Object.keys(c.logChannels||{}).length>0 || Boolean(c.logChannelId), config: { channelId:c.logChannelId || Object.values(c.logChannels||{})[0] || '', events:{messages:true,roles:true,channels:true,voice:true,moderation:true} } },
+      visuals: { enabled: Boolean(c.bannerUrl), config: { bannerURL:c.bannerUrl||'', counterCategoryId:'', memberCountChannelId:'', voiceCountChannelId:'' } },
+      verification: { enabled: Boolean(c.verificationRoleId), config:{ channelId:'', roleId:c.verificationRoleId||'', label:'Verify', captchaProvider:'discord' } },
+      boosterRewards: { enabled:false, config:{} },
+      dynamicVoice: { enabled:Boolean(c.temporaryVoice?.enabled), config:{ masterChannelId:'', userLimit:c.temporaryVoice?.userLimit||0, prefix:'🔊' } },
+      giveaways: { enabled:Array.isArray(c.giveaways) && c.giveaways.length>0, config:{} },
+      invites: { enabled:false, config:{} },
+      customCommands: { enabled:Object.keys(c.shortcuts||{}).length>0, config:{commands:c.shortcuts||{}} },
+      polls: { enabled:false, config:{} }, games:{enabled:false,config:{}}, music:{enabled:false,config:{}}, socials:{enabled:false,config:{}}, embeds:{enabled:false,config:{}}, escrow:{enabled:false,config:{}}, alliances:{enabled:false,config:{}}, streamers:{enabled:false,config:{}},
+    };
+    return map[section] || { enabled:false, config:{} };
+  }
 
   function field(label, id, value = '', type = 'text', cls = '') {
     if (type === 'checkbox') return `<label class="toggle ${cls}"><input id="${id}" type="checkbox" ${value ? 'checked' : ''}> <span>${label}</span></label>`;
@@ -163,15 +228,15 @@
   function button(id, label, kind = 'primary') { return `<button id="${id}" class="btn btn-${kind}">${label}</button>`; }
 
   function renderOverview() {
-    const g = currentGuildData.guild; const settings = currentGuildData.settings;
+    const g = currentGuildData.guild || {}; const settings = currentGuildData.settings || currentGuildData.config || {};
     return `<div class="section-banner"><div><span class="kicker">GENERAL & SERVER OVERVIEW</span><h2>${escapeHTML(g.name)}</h2><p>${escapeHTML(g.id)}</p></div><div class="pill">${settings.premiumTier?.toUpperCase() || 'FREE'}</div></div>
     <div class="page-grid">
-      <div class="card span-3"><span class="muted">Members</span><div class="metric">${Number(g.members||0).toLocaleString()}</div></div>
-      <div class="card span-3"><span class="muted">Channels</span><div class="metric">${Number(g.channels||0).toLocaleString()}</div></div>
-      <div class="card span-3"><span class="muted">Roles</span><div class="metric">${Number(g.roles||0).toLocaleString()}</div></div>
+      <div class="card span-3"><span class="muted">Members</span><div class="metric">${Number(g.members ?? currentGuildData.approximateMemberCount ?? 0).toLocaleString()}</div></div>
+      <div class="card span-3"><span class="muted">Channels</span><div class="metric">${Number((g.channels?.length ?? g.channels ?? 0)).toLocaleString()}</div></div>
+      <div class="card span-3"><span class="muted">Roles</span><div class="metric">${Number((g.roles?.length ?? g.roles ?? 0)).toLocaleString()}</div></div>
       <div class="card span-3"><span class="muted">Bot</span><div class="metric">${g.botInstalled ? 'LIVE' : 'OFF'}</div></div>
       <div class="card span-8"><h3>الهوية والإعدادات الأساسية</h3><div class="form-grid">${field('Prefix','prefixInput',settings.prefix||'+')}${field('Language','langInput',settings.language||'ar')} </div><div class="actions">${button('saveGeneral','حفظ الإعدادات')}</div></div>
-      <div class="card span-4"><h3>Dynamic Avatar</h3><img data-bot-avatar style="width:76px;height:76px;border-radius:22px;object-fit:cover;box-shadow:0 0 36px rgba(139,92,246,.35)"><p>الصورة تأتي من Discord API مباشرة ولا توجد صورة بوت ثابتة داخل GitHub.</p></div>
+      <div class="card span-4"><h3>Dynamic Avatar</h3><img data-bot-avatar style="width:76px;height:76px;border-radius:22px;object-fit:cover;box-shadow:0 0 36px rgba(139,92,246,.35)"><p>هوية RET لها صورة محلية ثابتة كخطة احتياط حتى لا تختفي الصور عند تعذر CDN.</p></div>
     </div>`;
   }
 
@@ -225,11 +290,11 @@
 
   function bindSectionActions() {
     $('#guildSelect')?.addEventListener('change', selectGuild);
-    $('#saveGeneral')?.addEventListener('click', async () => { try { await patch(`/api/guild/${currentGuildId}/settings`, { prefix:val('prefixInput'), language:val('langInput') }); await selectGuild(); toast('تم حفظ الإعدادات الأساسية.'); } catch(e) { toast(e.message,'error'); } });
+    $('#saveGeneral')?.addEventListener('click', async () => { try { await patch(`/api/guilds/${encodeURIComponent(currentGuildId)}/config`, { prefix:val('prefixInput'), language:val('langInput') }); await selectGuild(); toast('تم حفظ الإعدادات الأساسية.'); } catch(e) { toast(e.message,'error'); } });
     const save = async (section, config, enabled) => { try { await saveSection(section, config, enabled); await selectGuild(); toast('تم الحفظ والتطبيق فورياً.'); } catch(e) { toast(e.message,'error'); } };
     $('#saveModeration')?.addEventListener('click',()=>save('moderation',{ blockLinks:bool('blockLinks'), blockedWords:val('blockedWords').split(',').map(x=>x.trim()).filter(Boolean), antiRaid:{enabled:bool('raidEnabled'),threshold:Number(val('raidThreshold'))||8}},bool('modEnabled')));
     $('#saveTickets')?.addEventListener('click',()=>save('tickets',{categoryId:val('ticketCategory'),supportRoleId:val('ticketSupportRole'),channelId:val('ticketChannel'),buttonLabel:val('ticketLabel')},bool('ticketEnabled')));
-    $('#sendTicketPanel')?.addEventListener('click', async()=>{try{await post(`/api/guild/${currentGuildId}/action`,{action:'ticket_panel',data:{channelId:val('ticketChannel'),buttonLabel:val('ticketLabel')}});toast('تم إرسال Ticket Panel.');}catch(e){toast(e.message,'error')}});
+    $('#sendTicketPanel')?.addEventListener('click', async()=>{try{await post(`/api/guilds/${encodeURIComponent(currentGuildId)}/action`,{action:'ticket_panel',data:{channelId:val('ticketChannel'),buttonLabel:val('ticketLabel')}});toast('تم إرسال Ticket Panel.');}catch(e){toast(e.message,'error')}});
     $('#saveWelcome')?.addEventListener('click',()=>save('welcome',{channelId:val('welcomeChannel'),message:val('welcomeMessage'),leaveChannelId:val('leaveChannel'),leaveMessage:val('leaveMessage')},bool('welcomeEnabled')));
     $('#saveRoles')?.addEventListener('click',()=>save('roles',{autoRoleIds:val('autoRoleIds').split(',').map(x=>x.trim()).filter(Boolean),roleMap:jsonFrom('roleMap')},bool('rolesEnabled')));
     $('#saveEconomy')?.addEventListener('click',()=>save('economy',{currency:val('currency'),startingBalance:Number(val('startingBalance'))||0,dailyReward:Number(val('dailyReward'))||0,workMin:Number(val('workMin'))||0,workMax:Number(val('workMax'))||0},bool('ecoEnabled')));
@@ -242,7 +307,7 @@
     $('#saveCustomCommands')?.addEventListener('click',()=>save('customCommands',{commands:jsonFrom('customCommandsJSON')},true));
     $('#saveVerification')?.addEventListener('click',()=>save('verification',{channelId:val('verifyChannel'),roleId:val('verifiedRole'),label:val('verifyLabel'),captchaProvider:val('captchaProvider')},bool('verifyEnabled')));
     ['embedTitle','embedDescription','embedColor','embedFooter'].forEach(id=>$('#'+id)?.addEventListener('input', updateEmbedPreview));
-    $('#sendEmbed')?.addEventListener('click',async()=>{try{await post(`/api/guild/${currentGuildId}/action`,{action:'embed_send',data:{channelId:val('embedChannel'),title:val('embedTitle'),description:val('embedDescription'),color:val('embedColor'),footer:val('embedFooter')}});toast('تم إرسال الإيمبد.');}catch(e){toast(e.message,'error')}});
+    $('#sendEmbed')?.addEventListener('click',async()=>{try{await post(`/api/guilds/${encodeURIComponent(currentGuildId)}/action`,{action:'embed_send',data:{channelId:val('embedChannel'),title:val('embedTitle'),description:val('embedDescription'),color:val('embedColor'),footer:val('embedFooter')}});toast('تم إرسال الإيمبد.');}catch(e){toast(e.message,'error')}});
     $('#saveInvites')?.addEventListener('click',()=>save('invites',{reward:Number(val('inviteReward'))||0,logChannelId:val('inviteLogChannel'),roleThreshold:Number(val('inviteThreshold'))||0,rewardRoleId:val('inviteRole')},bool('inviteEnabled')));
     $('#savePolls')?.addEventListener('click',()=>save('polls',{channelId:val('pollChannel'),suggestionsChannelId:val('suggestionsChannel'),allowAnonymous:bool('pollAnon')},bool('pollsEnabled')));
     $('#saveGames')?.addEventListener('click',()=>save('games',{channelId:val('gamesChannel'),cooldown:Number(val('gamesCooldown'))||5,enabledGames:val('gamesJSON').split(',').map(x=>x.trim()).filter(Boolean)},bool('gamesEnabled')));
@@ -250,16 +315,16 @@
     $('#saveDynamicVoice')?.addEventListener('click',()=>save('dynamicVoice',{masterChannelId:val('masterVoice'),userLimit:Number(val('voiceLimit'))||0,prefix:val('voicePrefix')},bool('voiceEnabled')));
     $('#saveBooster')?.addEventListener('click',()=>save('boosterRewards',{roleId:val('boosterRole'),commandPrefix:val('boosterPrefix'),voiceCategoryId:val('boosterVoiceCategory'),defaultColor:val('boosterColor')},bool('boosterEnabled')));
     $('#saveAlliances')?.addEventListener('click',()=>save('alliances',{allianceId:val('allianceId'),sharedEconomy:bool('sharedEconomy'),crossBan:bool('crossBan'),levelSync:bool('levelSync')},bool('allianceEnabled')));
-    $('#createBackup')?.addEventListener('click',async()=>{try{await post(`/api/guild/${currentGuildId}/backups`,{});toast('تم إنشاء Snapshot بنجاح.');loadBackups();}catch(e){toast(e.message,'error')}});
+    $('#createBackup')?.addEventListener('click',async()=>{try{await post(`/api/guilds/${currentGuildId}/backups`,{});toast('تم إنشاء Snapshot بنجاح.');loadBackups();}catch(e){toast(e.message,'error')}});
     $('#refreshBackups')?.addEventListener('click',loadBackups);
     $('#checkStreamers')?.addEventListener('click',loadStreamersStatus);
-    $('#saveStreamers')?.addEventListener('click',async()=>{try{await patch(`/api/guild/${currentGuildId}/streamers`,{enabled:bool('streamEnabled'),entries:jsonFrom('streamEntries')});toast('تم حفظ مصادر البث.');loadStreamersStatus();}catch(e){toast(e.message,'error')}});
-    $('#createProduct')?.addEventListener('click',async()=>{try{await post(`/api/guild/${currentGuildId}/store`,{name:val('pName'),description:'',price:Number(val('pPrice'))||0,currency:val('pCurrency'),roleId:val('pRole'),digitalDelivery:val('pDelivery'),type:val('pRole')?'role':'digital'});toast('تمت إضافة المنتج.');loadStore();}catch(e){toast(e.message,'error')}});
-    $('#createTournament')?.addEventListener('click',async()=>{try{await post(`/api/guild/${currentGuildId}/tournaments`,{name:val('tName'),game:val('tGame'),maxTeams:Number(val('tMax'))||16});toast('تم إنشاء البطولة.');loadTournaments();}catch(e){toast(e.message,'error')}});
-    $('#createBackup')?.addEventListener('click',async()=>{try{await post(`/api/guild/${currentGuildId}/backups`,{});toast('Snapshot created.');loadBackups();}catch(e){toast(e.message,'error')}});
+    $('#saveStreamers')?.addEventListener('click',async()=>{try{await patch(`/api/guilds/${currentGuildId}/streamers`,{enabled:bool('streamEnabled'),entries:jsonFrom('streamEntries')});toast('تم حفظ مصادر البث.');loadStreamersStatus();}catch(e){toast(e.message,'error')}});
+    $('#createProduct')?.addEventListener('click',async()=>{try{await post(`/api/guilds/${currentGuildId}/store`,{name:val('pName'),description:'',price:Number(val('pPrice'))||0,currency:val('pCurrency'),roleId:val('pRole'),digitalDelivery:val('pDelivery'),type:val('pRole')?'role':'digital'});toast('تمت إضافة المنتج.');loadStore();}catch(e){toast(e.message,'error')}});
+    $('#createTournament')?.addEventListener('click',async()=>{try{await post(`/api/guilds/${currentGuildId}/tournaments`,{name:val('tName'),game:val('tGame'),maxTeams:Number(val('tMax'))||16});toast('تم إنشاء البطولة.');loadTournaments();}catch(e){toast(e.message,'error')}});
+    $('#createBackup')?.addEventListener('click',async()=>{try{await post(`/api/guilds/${currentGuildId}/backups`,{});toast('Snapshot created.');loadBackups();}catch(e){toast(e.message,'error')}});
     $('#sendBroadcast')?.addEventListener('click',async()=>{try{const text=val('broadcastMessage').trim(); if(!text) throw new Error('اكتب الرسالة أولاً.'); const result=await post('/api/developer/broadcast',{message:text,channelId:val('broadcastChannel')});toast(`تم الإرسال: ${result.delivered} / ${result.total}`);}catch(e){toast(e.message,'error')}});
-    $('#voiceRename')?.addEventListener('click', async()=>{const id=prompt('Channel ID');const name=prompt('الاسم الجديد');if(!id||!name)return;try{await post(`/api/guild/${currentGuildId}/action`,{action:'voice_rename',data:{channelId:id,name}});toast('تم تغيير الاسم.')}catch(e){toast(e.message,'error')}});
-    $('#voiceLock')?.addEventListener('click', async()=>{const id=prompt('Channel ID');if(!id)return;try{await post(`/api/guild/${currentGuildId}/action`,{action:'voice_lock',data:{channelId:id,locked:true}});toast('تم قفل الروم.')}catch(e){toast(e.message,'error')}});
+    $('#voiceRename')?.addEventListener('click', async()=>{const id=prompt('Channel ID');const name=prompt('الاسم الجديد');if(!id||!name)return;try{await post(`/api/guilds/${encodeURIComponent(currentGuildId)}/action`,{action:'voice_rename',data:{channelId:id,name}});toast('تم تغيير الاسم.')}catch(e){toast(e.message,'error')}});
+    $('#voiceLock')?.addEventListener('click', async()=>{const id=prompt('Channel ID');if(!id)return;try{await post(`/api/guilds/${encodeURIComponent(currentGuildId)}/action`,{action:'voice_lock',data:{channelId:id,locked:true}});toast('تم قفل الروم.')}catch(e){toast(e.message,'error')}});
     if (activeSection==='analytics') loadAnalytics();
     if (activeSection==='monitor') loadMonitor();
     if (activeSection==='activityHeatmap') loadHeatmap();
@@ -271,36 +336,40 @@
   }
   function updateEmbedPreview() { if (!$('#embedPreview')) return; $('#previewTitle').textContent=val('embedTitle')||'RET Announcement'; $('#previewDescription').textContent=val('embedDescription')||'اكتب وصف الإيمبد هنا...'; $('#embedPreview .embed-bar').style.background=val('embedColor')||'#8b5cf6'; }
 
-  async function loadAnalytics() { try { const r=await api(`/api/guild/${currentGuildId}/analytics/recommendations`); $('#analyticsResults').innerHTML=r.recommendations.map(x=>`<div class="card" style="margin-bottom:10px"><span class="pill">${escapeHTML(x.severity)}</span><h3>${escapeHTML(x.title)}</h3><p>${escapeHTML(x.body)}</p></div>`).join(''); } catch(e){toast(e.message,'error')} }
+  async function loadAnalytics() { try { const r=await api(`/api/guilds/${currentGuildId}/analytics/recommendations`); $('#analyticsResults').innerHTML=r.recommendations.map(x=>`<div class="card" style="margin-bottom:10px"><span class="pill">${escapeHTML(x.severity)}</span><h3>${escapeHTML(x.title)}</h3><p>${escapeHTML(x.body)}</p></div>`).join(''); } catch(e){toast(e.message,'error')} }
   async function loadMonitor() { try { const r=await api('/api/status'); $('#monitorOnline').textContent=r.online?'LIVE':'OFF'; $('#monitorUptime').textContent=formatDuration(r.uptime); $('#monitorGuilds').textContent=Number(r.guilds||0).toLocaleString(); $('#monitorMemory').textContent=JSON.stringify(r.memory,null,2); } catch(e){toast(e.message,'error')} }
-  async function loadHeatmap() { try { const r=await api(`/api/guild/${currentGuildId}/activity-heatmap`); const flat=r.heatmap.flat(); const max=Math.max(1,...flat); $('#heatmap').innerHTML=r.heatmap.map((row,day)=>row.map((v,h)=>{const level=v?Math.min(4,Math.ceil(v/max*4)):0;return `<span class="heat-cell" data-level="${level}" title="Day ${day} ${h}:00 • ${v}"></span>`}).join('')).join(''); $('#heatmapLegend').textContent=`Max activity bucket: ${max}`; $('#activeChannels').innerHTML=r.channels.length?`<table class="table"><thead><tr><th>Channel</th><th>Events</th></tr></thead><tbody>${r.channels.map(c=>`<tr><td>${escapeHTML(c.name||c.id||'Unknown')}</td><td>${c.count}</td></tr>`).join('')}</tbody></table>`:'لا توجد بيانات نشاط بعد.'; } catch(e){toast(e.message,'error')} }
-  async function loadTournaments() { try { const r=await api(`/api/guild/${currentGuildId}/tournaments`); $('#tournamentList').innerHTML=r.tournaments.length?r.tournaments.map(t=>`<div class="card" style="margin-bottom:10px"><b>${escapeHTML(t.name)}</b><p>${escapeHTML(t.game)} • ${t.teams.length} teams • ${escapeHTML(t.status)}</p><div class="actions"><button class="btn btn-soft" data-build="${t._id}">Build Bracket</button></div></div>`).join(''):'لا توجد بطولات.'; $$('[data-build]').forEach(b=>b.onclick=async()=>{try{await post(`/api/guild/${currentGuildId}/tournaments/${b.dataset.build}/build-bracket`,{});toast('تم بناء الـBracket.');loadTournaments();}catch(e){toast(e.message,'error')}}); }catch(e){toast(e.message,'error')} }
-  async function loadBackups() { if (!$('#backupList')) return; try { const r=await api(`/api/guild/${currentGuildId}/backups`); $('#backupList').innerHTML=r.backups.length?`<table class="table"><thead><tr><th>Backup</th><th>Size</th><th>Checksum</th></tr></thead><tbody>${r.backups.map(b=>`<tr><td>${escapeHTML(b.backupId)}</td><td>${Number(b.bytes).toLocaleString()} bytes</td><td><code>${escapeHTML(b.checksum.slice(0,16))}…</code></td></tr>`).join('')}</tbody></table>`:'لا توجد نسخ بعد.'; } catch(e){toast(e.message,'error')} }
-  async function loadStreamersStatus() { if (!$('#streamStatuses')) return; try{const r=await api(`/api/guild/${currentGuildId}/streamers`); $('#streamStatuses').innerHTML=r.statuses.length?r.statuses.map(s=>`<div class="card" style="margin-top:10px"><b>${escapeHTML(s.provider)}</b><p>${escapeHTML(s.status)}${s.login?' • '+escapeHTML(s.login):''}${s.username?' • '+escapeHTML(s.username):''}</p></div>`).join(''):'لا توجد مصادر.';}catch(e){toast(e.message,'error')} }
-  async function loadStore() { if(!$('#storeList')) return; try{const r=await api(`/api/guild/${currentGuildId}/store`);$('#storeList').innerHTML=r.products.length?`<table class="table"><thead><tr><th>Product</th><th>Type</th><th>Price</th></tr></thead><tbody>${r.products.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td>${escapeHTML(p.type)}</td><td>${p.price} ${escapeHTML(p.currency)}</td></tr>`).join('')}</tbody></table>`:'لا توجد منتجات.';}catch(e){toast(e.message,'error')} }
+  async function loadHeatmap() { try { const r=await api(`/api/guilds/${currentGuildId}/activity-heatmap`); const flat=r.heatmap.flat(); const max=Math.max(1,...flat); $('#heatmap').innerHTML=r.heatmap.map((row,day)=>row.map((v,h)=>{const level=v?Math.min(4,Math.ceil(v/max*4)):0;return `<span class="heat-cell" data-level="${level}" title="Day ${day} ${h}:00 • ${v}"></span>`}).join('')).join(''); $('#heatmapLegend').textContent=`Max activity bucket: ${max}`; $('#activeChannels').innerHTML=r.channels.length?`<table class="table"><thead><tr><th>Channel</th><th>Events</th></tr></thead><tbody>${r.channels.map(c=>`<tr><td>${escapeHTML(c.name||c.id||'Unknown')}</td><td>${c.count}</td></tr>`).join('')}</tbody></table>`:'لا توجد بيانات نشاط بعد.'; } catch(e){toast(e.message,'error')} }
+  async function loadTournaments() { try { const r=await api(`/api/guilds/${currentGuildId}/tournaments`); $('#tournamentList').innerHTML=r.tournaments.length?r.tournaments.map(t=>`<div class="card" style="margin-bottom:10px"><b>${escapeHTML(t.name)}</b><p>${escapeHTML(t.game)} • ${t.teams.length} teams • ${escapeHTML(t.status)}</p><div class="actions"><button class="btn btn-soft" data-build="${t._id}">Build Bracket</button></div></div>`).join(''):'لا توجد بطولات.'; $$('[data-build]').forEach(b=>b.onclick=async()=>{try{await post(`/api/guilds/${currentGuildId}/tournaments/${b.dataset.build}/build-bracket`,{});toast('تم بناء الـBracket.');loadTournaments();}catch(e){toast(e.message,'error')}}); }catch(e){toast(e.message,'error')} }
+  async function loadBackups() { if (!$('#backupList')) return; try { const r=await api(`/api/guilds/${currentGuildId}/backups`); $('#backupList').innerHTML=r.backups.length?`<table class="table"><thead><tr><th>Backup</th><th>Size</th><th>Checksum</th></tr></thead><tbody>${r.backups.map(b=>`<tr><td>${escapeHTML(b.backupId)}</td><td>${Number(b.bytes).toLocaleString()} bytes</td><td><code>${escapeHTML(b.checksum.slice(0,16))}…</code></td></tr>`).join('')}</tbody></table>`:'لا توجد نسخ بعد.'; } catch(e){toast(e.message,'error')} }
+  async function loadStreamersStatus() { if (!$('#streamStatuses')) return; try{const r=await api(`/api/guilds/${currentGuildId}/streamers`); $('#streamStatuses').innerHTML=r.statuses.length?r.statuses.map(s=>`<div class="card" style="margin-top:10px"><b>${escapeHTML(s.provider)}</b><p>${escapeHTML(s.status)}${s.login?' • '+escapeHTML(s.login):''}${s.username?' • '+escapeHTML(s.username):''}</p></div>`).join(''):'لا توجد مصادر.';}catch(e){toast(e.message,'error')} }
+  async function loadStore() { if(!$('#storeList')) return; try{const r=await api(`/api/guilds/${currentGuildId}/store`);$('#storeList').innerHTML=r.products.length?`<table class="table"><thead><tr><th>Product</th><th>Type</th><th>Price</th></tr></thead><tbody>${r.products.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td>${escapeHTML(p.type)}</td><td>${p.price} ${escapeHTML(p.currency)}</td></tr>`).join('')}</tbody></table>`:'لا توجد منتجات.';}catch(e){toast(e.message,'error')} }
 
   async function initDashboard() {
     renderNav();
-    try { await loadMe(); await loadGuilds(); } catch (error) { toast(error.message, 'error'); setTimeout(()=>{ window.location.href = `${API_BASE}/auth/discord`; }, 1200); }
+    try { await loadMe(); await loadGuilds(); } catch (error) { toast(error.message, 'error'); setTimeout(()=>{ goToLogin(); }, 700); }
     $('#mobileMenu')?.addEventListener('click',()=>$('#sidebar')?.classList.toggle('open'));
     $('#logoutBtn')?.addEventListener('click',async()=>{try{await post('/auth/logout',{});}finally{window.location.href='index.html';}});
   }
 
   async function initDeveloper() {
-    try { const r=await api('/api/developer/overview'); renderDeveloper(r); } catch(e){ toast(e.message,'error'); setTimeout(()=>{window.location.href='dashboard.html';},1200); }
+    try { const r=await api('/api/developer'); renderDeveloper(r); }
+    catch(e){ toast(e.message,'error'); setTimeout(()=>{window.location.replace('dashboard.html');},700); }
   }
   function renderDeveloper(r) {
     const root=$('#developerContent'); if(!root)return;
-    root.innerHTML = `<div class="section-banner"><div><span class="kicker">DEVELOPER CORE</span><h2>Owner Control Plane</h2><p>Premium، Global Blacklist، Broadcast، وحالة البوت.</p></div><span class="pill">${r.bot.online?'ONLINE':'OFFLINE'}</span></div><div class="page-grid"><div class="card span-4"><span class="muted">Guilds</span><div class="metric">${r.bot.guilds}</div></div><div class="card span-4"><span class="muted">Members</span><div class="metric">${r.bot.users}</div></div><div class="card span-4"><span class="muted">Users in DB</span><div class="metric">${r.users}</div></div><div class="card span-6"><h3>Premium Access</h3><div class="form-grid">${field('Target Type','premiumType','guild')}${field('Target ID','premiumId','')}${field('Tier','premiumTier','pro')}</div><div class="actions">${button('grantPremium','تطبيق Premium')}</div></div><div class="card span-6"><h3>Global Blacklist</h3><div class="form-grid">${field('Scope','blacklistScope','guild')}${field('Target ID','blacklistId','')}${field('Reason','blacklistReason','Violation / policy reason')}</div><div class="actions">${button('blacklistAdd','حظر','danger')} ${button('blacklistRemove','فك الحظر','soft')}</div></div><div class="card span-12"><h3>Owner Broadcast</h3>${textarea('Message','devBroadcast','','full')||''}<div class="actions"><button id="devBroadcastBtn" class="btn btn-danger">إرسال لجميع السيرفرات</button></div></div><div class="card span-12"><h3>Recent Broadcasts</h3><div id="devBroadcasts">${r.recentBroadcasts?.length?r.recentBroadcasts.map(b=>`<div class="card" style="margin-top:8px"><b>${escapeHTML(b.status)}</b><p>${escapeHTML(b.message)}</p><span class="muted">${b.delivered}/${b.sentTo}</span></div>`).join(''):'لا يوجد'}</div></div></div>`;
-    $('#grantPremium')?.addEventListener('click',async()=>{try{await patch('/api/developer/premium',{targetType:val('premiumType'),targetId:val('premiumId'),tier:val('premiumTier')});toast('تم تحديث Premium.');}catch(e){toast(e.message,'error')}});
-    $('#blacklistAdd')?.addEventListener('click',async()=>{try{await post('/api/developer/blacklist',{scope:val('blacklistScope'),targetId:val('blacklistId'),reason:val('blacklistReason')});toast('تم تطبيق الحظر.');}catch(e){toast(e.message,'error')}});
-    $('#blacklistRemove')?.addEventListener('click',async()=>{try{await api(`/api/developer/blacklist/${encodeURIComponent(val('blacklistScope'))}/${encodeURIComponent(val('blacklistId'))}`,{method:'DELETE'});toast('تم فك الحظر.');}catch(e){toast(e.message,'error')}});
-    $('#devBroadcastBtn')?.addEventListener('click',async()=>{try{const m=val('devBroadcast').trim();if(!m)throw new Error('اكتب الرسالة أولاً.');const x=await post('/api/developer/broadcast',{message:m});toast(`Delivered ${x.delivered}/${x.total}`);}catch(e){toast(e.message,'error')}});
+    const p=r.persistence||{};
+    root.innerHTML = `<div class="section-banner"><div><span class="kicker">DEVELOPER CORE</span><h2>Owner Control Plane</h2><p>حالة البوت والتخزين من الـAPI الفعلي.</p></div><span class="pill">${escapeHTML(String(r.guilds ?? 0))} GUILDS</span></div><div class="page-grid"><div class="card span-4"><span class="muted">Connected Guilds</span><div class="metric">${Number(r.guilds||0).toLocaleString()}</div></div><div class="card span-4"><span class="muted">Premium Plans</span><div class="metric">${Number(r.plans||0).toLocaleString()}</div></div><div class="card span-4"><span class="muted">Persistence</span><div class="metric">${p.lastError ? 'ERROR' : 'OK'}</div></div><div class="card span-12"><h3>Persistence Status</h3><pre class="codebox" style="min-height:180px">${escapeHTML(JSON.stringify(p,null,2))}</pre></div></div>`;
   }
 
+  bindImageFallbacks();
+  if (page === 'home' && location.hash.toLowerCase() === '#dashboard') {
+    window.location.replace('dashboard.html');
+    return;
+  }
   if (page === 'home') { renderFeatureGrid(); loadBotIdentity(); }
   if (page === 'dashboard') { initDashboard(); }
   if (page === 'developer') { initDeveloper(); }
+  bindImageFallbacks();
   loadBotIdentity();
   setInterval(loadBotIdentity, 30000);
 })();
